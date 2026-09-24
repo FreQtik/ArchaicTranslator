@@ -1,0 +1,427 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#f3f4f6">
+<meta name="description" content="A local-first semantic translator from casual modern English into dramatic literary Early Modern English.">
+<title>Archaic — Translator</title>
+<style>
+:root{
+  color-scheme:light;
+  --bg:#f3f4f6;--surface:#fff;--surface2:#f8f9fb;--text:#17191c;--muted:#747981;
+  --line:#dcdee2;--line2:#c8cbd0;--accent:#1f2226;--soft:#eef0f3;--good:#35775b;
+  --warn:#9a6b2a;--bad:#a14444;--r:20px;--shadow:0 18px 48px rgba(20,24,30,.055)
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+button,textarea{font:inherit}button{cursor:pointer}
+.app{width:min(900px,calc(100% - 28px));margin:0 auto;padding:38px 0 56px}
+header{display:flex;justify-content:space-between;align-items:flex-end;gap:18px;margin-bottom:22px}
+h1{font-size:29px;line-height:1;margin:0;font-weight:740;letter-spacing:-.04em}
+.sub{font-size:13px;color:var(--muted);margin-top:7px}
+.status{display:flex;align-items:center;gap:8px;color:var(--muted);font-size:12px;white-space:nowrap}
+.dot{width:8px;height:8px;border-radius:50%;background:#acb0b6;box-shadow:0 0 0 4px rgba(174,178,183,.12)}
+.dot.good{background:var(--good);box-shadow:0 0 0 4px rgba(52,120,90,.10)}
+.dot.work{background:var(--warn);box-shadow:0 0 0 4px rgba(155,107,40,.10);animation:pulse 1.25s ease-in-out infinite}
+.dot.bad{background:var(--bad);box-shadow:0 0 0 4px rgba(160,68,68,.10)}
+@keyframes pulse{50%{opacity:.38}}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);overflow:hidden}
+.labelbar{display:flex;align-items:center;justify-content:space-between;padding:15px 17px 0}
+.label{font-size:12px;font-weight:740;color:#535960;letter-spacing:.02em}
+.counter{font-size:11px;color:#9ba0a6}
+textarea{width:100%;min-height:190px;border:0;outline:0;resize:vertical;background:transparent;padding:14px 17px 18px;color:var(--text);font-size:22px;line-height:1.45;letter-spacing:-.015em}
+textarea::placeholder{color:#b6bac0}
+.actions{display:flex;gap:8px;align-items:center;padding:0 14px 14px;flex-wrap:wrap}
+.btn{border:1px solid var(--line2);background:var(--surface);color:var(--text);border-radius:11px;min-height:42px;padding:0 14px;font-weight:690;font-size:13px;transition:.12s ease}
+.btn:hover:not(:disabled){transform:translateY(-1px);border-color:#aeb2b7}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:white;padding-inline:18px}
+.btn.secondary{background:var(--surface2)}
+.btn.icon{width:42px;padding:0;display:grid;place-items:center}
+.btn:disabled{opacity:.38;cursor:default;transform:none}
+.keyhint{margin-left:auto;font-size:11px;color:#a6abb1}
+.flow{height:62px;display:grid;place-items:center;color:#a4a9af}
+.flow svg{width:23px;height:23px}
+.output{min-height:244px}
+.outputText{min-height:164px;padding:18px 17px 8px;font-family:Georgia,"Times New Roman",serif;font-size:30px;line-height:1.39;letter-spacing:-.012em;white-space:pre-wrap}
+.outputText.placeholder{color:#b8bbc0;font-style:italic;font-size:24px}
+.meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;padding:0 17px 15px;color:var(--muted);font-size:11px}
+.pill{background:var(--soft);border:1px solid #e3e5e8;border-radius:999px;padding:5px 8px}
+.progressWrap{height:3px;background:#eceef0;overflow:hidden;opacity:0;transition:opacity .15s}
+.progressWrap.show{opacity:1}
+.progress{height:100%;width:0;background:#62686f;transition:width .2s ease}
+.note{margin:14px 5px 0;color:#898e95;font-size:11px;line-height:1.55;text-align:center}
+.filewarn{display:none;margin:0 0 14px;border:1px solid #e3cda7;background:#fffaf0;color:#765423;border-radius:13px;padding:11px 13px;font-size:12px;line-height:1.5}
+.filewarn.show{display:block}
+.toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,16px);background:#1e2125;color:#fff;padding:10px 13px;border-radius:10px;font-size:12px;font-weight:650;opacity:0;pointer-events:none;transition:.18s;box-shadow:0 14px 35px rgba(0,0,0,.16)}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+@media(max-width:640px){
+  .app{width:min(100% - 18px,900px);padding-top:24px}
+  header{align-items:flex-start;flex-direction:column;margin-left:4px}
+  textarea{font-size:19px;min-height:165px}.outputText{font-size:27px}.keyhint{display:none}.flow{height:48px}
+}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div>
+      <h1>Archaic</h1>
+      <div class="sub">Casual English → authentic dramatic Early Modern English</div>
+    </div>
+    <div class="status"><span id="statusDot" class="dot"></span><span id="statusText">Ready</span></div>
+  </header>
+
+  <div id="filewarn" class="filewarn">
+    The full semantic translator cannot reliably start from <b>file://</b>. Launch this folder with <b>START_ARCHAIC.bat</b> or host it normally; otherwise only the limited fallback can run.
+  </div>
+
+  <section class="panel">
+    <div class="labelbar">
+      <div class="label">MODERN ENGLISH</div>
+      <div id="counter" class="counter">0 / 500</div>
+    </div>
+    <textarea id="input" maxlength="500" spellcheck="true" autofocus placeholder="Your jacket looks like garbage."></textarea>
+    <div class="actions">
+      <button id="translate" class="btn primary">Translate</button>
+      <button id="clear" class="btn secondary">Clear</button>
+      <span class="keyhint">Ctrl/⌘ + Enter</span>
+    </div>
+    <div id="progressWrap" class="progressWrap"><div id="progress" class="progress"></div></div>
+  </section>
+
+  <div class="flow" aria-hidden="true">
+    <svg viewBox="0 0 24 24" fill="none"><path d="M12 4v15m0 0-5-5m5 5 5-5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </div>
+
+  <section class="panel output" aria-live="polite">
+    <div id="output" class="outputText placeholder">Thy translation shall appear here.</div>
+    <div id="meta" class="meta">
+      <span class="pill">meaning first</span>
+      <span class="pill">period rhetoric</span>
+      <span class="pill">original wording</span>
+    </div>
+    <div class="actions">
+      <button id="regenerate" class="btn secondary" disabled>Regenerate</button>
+      <button id="copy" class="btn icon" disabled title="Copy translation" aria-label="Copy translation">
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none"><path d="M9 8h9a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H9a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Z" stroke="currentColor" stroke-width="1.7"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h2" stroke="currentColor" stroke-width="1.7"/></svg>
+      </button>
+    </div>
+  </section>
+
+  <div class="note">The AI first interprets the sentence's intent and tone, then composes an original period-style equivalent. It is not meant to be a literal word replacer.</div>
+</div>
+<div id="toast" class="toast" role="status"></div>
+
+<script type="module">
+const $=s=>document.querySelector(s);
+const E={input:$("#input"),output:$("#output"),translate:$("#translate"),clear:$("#clear"),
+regenerate:$("#regenerate"),copy:$("#copy"),counter:$("#counter"),statusDot:$("#statusDot"),
+statusText:$("#statusText"),meta:$("#meta"),progressWrap:$("#progressWrap"),progress:$("#progress"),
+toast:$("#toast"),filewarn:$("#filewarn")};
+
+let worker=null,lastInput="",lastOutput="",generation=0,currentRequest=0,modelReady=false,fallbackOnly=false,loading=false;
+
+if(location.protocol==="file:") E.filewarn.classList.add("show");
+
+const CURATED=new Map(Object.entries({
+  "your jacket looks like garbage":"That coat upon thy back is fit more for the midden than for decent company.",
+  "your jacket looks terrible":"That coat doth thee no kindness; cast it off ere it offend another eye.",
+  "what the heck did you think you were doing":"What madness possessed thee? What didst thou imagine thyself about?",
+  "what the hell did you think you were doing":"What madness possessed thee? What didst thou imagine thyself about?",
+  "what's this man come on":"What folly is this, good fellow? Come, have done.",
+  "whats this man come on":"What folly is this, good fellow? Come, have done.",
+  "come on man":"Come, good fellow; have done with this.",
+  "this is stupid":"This is folly of the first order.",
+  "that's stupid":"That is folly fit to shame a fool.",
+  "you look ridiculous":"Thou art arrayed in a fashion fit to make sober men marvel.",
+  "i don't care":"It troubleth me not in the least.",
+  "i dont care":"It troubleth me not in the least.",
+  "i don't know":"I know not.",
+  "i dont know":"I know not.",
+  "what are you doing":"What business hast thou here?",
+  "where are you going":"Whither art thou bound?",
+  "what do you mean":"What meanest thou by this?",
+  "are you serious":"Speakest thou in earnest?",
+  "are you kidding me":"Dost thou make sport of me?",
+  "leave me alone":"Trouble me no further.",
+  "shut up":"Hold thy tongue.",
+  "hurry up":"Make haste; the hour waiteth for no man.",
+  "wait for me":"Tarry but a moment for me.",
+  "i'm tired":"Weariness hath laid siege to my bones.",
+  "im tired":"Weariness hath laid siege to my bones.",
+  "i'm hungry":"Hunger clamoureth within me like an unpaid creditor.",
+  "im hungry":"Hunger clamoureth within me like an unpaid creditor.",
+  "this is amazing":"By my troth, this is a wondrous thing.",
+  "that's amazing":"By my troth, that is wondrous indeed.",
+  "i love you":"I love thee beyond the poor measure of these words.",
+  "thank you":"Thou hast my thanks.",
+  "thanks":"My thanks to thee.",
+  "hello":"Well met.",
+  "goodbye":"Fare thee well."
+}));
+
+function norm(s){return s.toLowerCase().trim().replace(/[’']/g,"'").replace(/[!?.,;:]+/g," ").replace(/\s+/g," ")}
+function cap(s){return s?s[0].toUpperCase()+s.slice(1):s}
+function finish(s,src){
+  s=s.trim().replace(/\s+([!?.,;:])/g,"$1").replace(/\s{2,}/g," ");
+  if(!/[.!?]$/.test(s))s+=src.trim().endsWith("?")?"?":src.trim().endsWith("!")?"!":".";
+  return cap(s)
+}
+function setStatus(k,t){E.statusDot.className="dot"+(k?" "+k:"");E.statusText.textContent=t}
+function busy(b){
+  loading=b;E.translate.disabled=b;E.regenerate.disabled=b||!lastOutput;
+  E.translate.textContent=b?"Translating…":"Translate"
+}
+function toast(s){E.toast.textContent=s;E.toast.classList.add("show");clearTimeout(toast.t);toast.t=setTimeout(()=>E.toast.classList.remove("show"),1500)}
+function show(s,label){
+  lastOutput=s.trim();E.output.textContent=lastOutput;E.output.classList.remove("placeholder");
+  E.copy.disabled=false;E.regenerate.disabled=false;
+  E.meta.innerHTML=`<span class="pill">${label}</span><span class="pill">period rhetoric</span><span class="pill">original wording</span>`
+}
+
+function fallback(src){
+  const n=norm(src);
+  if(CURATED.has(n))return CURATED.get(n);
+
+  let m;
+  if((m=n.match(/^your (.+) looks like (?:garbage|trash|shit)$/)))
+    return finish(`That ${m[1]} of thine is fit more for the midden than for mortal company`,src);
+  if((m=n.match(/^your (.+) looks (?:bad|awful|terrible|ugly)$/)))
+    return finish(`That ${m[1]} of thine doth thee little honour`,src);
+  if((m=n.match(/^what (?:the heck|the hell) did you think (.+)$/)))
+    return finish(`What madness possessed thee? What didst thou imagine ${m[1]}`,src);
+  if((m=n.match(/^why did you (.+)$/)))
+    return finish(`Wherefore didst thou ${m[1]}`,src);
+  if((m=n.match(/^why are you (.+)$/)))
+    return finish(`Wherefore art thou ${m[1]}`,src);
+  if((m=n.match(/^did you (.+)$/)))
+    return finish(`Didst thou ${m[1]}`,src);
+  if((m=n.match(/^do you (.+)$/)))
+    return finish(`Dost thou ${m[1]}`,src);
+  if((m=n.match(/^are you (.+)$/)))
+    return finish(`Art thou ${m[1]}`,src);
+  if((m=n.match(/^were you (.+)$/)))
+    return finish(`Wert thou ${m[1]}`,src);
+  if((m=n.match(/^will you (.+)$/)))
+    return finish(`Wilt thou ${m[1]}`,src);
+  if((m=n.match(/^can you (.+)$/)))
+    return finish(`Canst thou ${m[1]}`,src);
+
+  let s=src.trim()
+    .replace(/\bwhat the heck\b/gi,"what madness")
+    .replace(/\bwhat the hell\b/gi,"what madness")
+    .replace(/\bcome on\b/gi,"come, have done")
+    .replace(/\bgarbage\b/gi,"refuse")
+    .replace(/\btrash\b/gi,"refuse")
+    .replace(/\bstupid\b/gi,"foolish")
+    .replace(/\bridiculous\b/gi,"absurd")
+    .replace(/\bmaybe\b/gi,"perchance")
+    .replace(/\bperhaps\b/gi,"perchance")
+    .replace(/\bbefore\b/gi,"ere")
+    .replace(/\bbetween\b/gi,"betwixt")
+    .replace(/\bsoon\b/gi,"anon")
+    .replace(/\byours\b/gi,"thine")
+    .replace(/\byour\b(?=\s+[aeiou])/gi,"thine")
+    .replace(/\byour\b/gi,"thy")
+    .replace(/\bare you\b/gi,"art thou")
+    .replace(/\bwere you\b/gi,"wert thou")
+    .replace(/\bdid you\b/gi,"didst thou")
+    .replace(/\bdo you\b/gi,"dost thou")
+    .replace(/\bhave you\b/gi,"hast thou")
+    .replace(/\bwill you\b/gi,"wilt thou")
+    .replace(/\bcan you\b/gi,"canst thou")
+    .replace(/\bwould you\b/gi,"wouldst thou")
+    .replace(/\bshould you\b/gi,"shouldst thou")
+    .replace(/\byou\b/gi,"thee")
+    .replace(/\bdoes\b/gi,"doth")
+    .replace(/\bhas\b/gi,"hath")
+    .replace(/\bnothing\b/gi,"naught")
+    .replace(/\banything\b/gi,"aught");
+  return finish(s,src)
+}
+
+function sourceForWorker(){
+const SYSTEM=`You are a specialist translator and literary rewriter for natural, dramatic Early Modern English.
+
+The user gives you casual contemporary English. Your job is NOT to preserve its wording. Your job is to preserve its MEANING, SOCIAL INTENT, ATTITUDE, and EMOTIONAL FORCE, then express that meaning as an educated but lively speaker of literary English around the late sixteenth / early seventeenth century might plausibly express it.
+
+Internally perform four steps:
+1. Infer the actual intended meaning, including slang, sarcasm, insults, disbelief, frustration, jokes, and implied context.
+2. Discard modern idiom and sentence construction where a period-style expression would sound more natural.
+3. Recompose it using historically plausible Early Modern grammar, vocabulary, cadence, rhetorical parallelism, metaphor, hyperbole, inversion, exclamation, or imagery when appropriate.
+4. Check pronoun and verb agreement before answering.
+
+TARGET STYLE:
+- Shakespearean in rhetorical energy, but NEVER quote Shakespeare or imitate a specific copyrighted modern adaptation.
+- Original wording only.
+- Noticeably more colourful than the modern sentence.
+- Usually one or two strong sentences.
+- Casual insults should become inventive period-style contempt, not literal substitutions.
+- Surprise should become exclamation or rhetorical question where natural.
+- Annoyance should carry bite.
+- Affection should become warm, elevated language.
+- Plain informational statements should remain understandable and need not become absurdly poetic.
+- Do not add facts the speaker did not imply.
+
+GRAMMAR:
+- singular familiar subject: thou
+- singular familiar object: thee
+- possessive adjective: thy; thine before a vowel sound and as standalone possessive
+- art, wast/wert, hast, dost, didst, wilt, shalt, canst, mayst, wouldst, shouldst
+- correct -st/-est agreement with thou when appropriate
+- imperative uses the base verb: "Go forth and create", NOT "createth"
+- third-person -th/-eth may appear where idiomatic
+- wherefore = why; whither = to where; whence = from where
+- contractions and modern filler words should normally be recomposed, not copied
+
+QUALITY TEST:
+If the result could be produced by simply replacing "your" with "thy", it is probably too literal. Rewrite the underlying thought instead.
+
+Examples of the desired transformation principle:
+Modern: "Your jacket looks like garbage."
+Desired kind of result: "That coat upon thy back is fit more for the midden than for decent company."
+
+Modern: "What the heck did you think you were doing?"
+Desired kind of result: "What madness possessed thee? What didst thou imagine thyself about?"
+
+Modern: "What's this, man? Come on."
+Desired kind of result: "What folly is this, good fellow? Come, have done."
+
+Modern: "Are you kidding me?"
+Desired kind of result: "Dost thou make sport of me?"
+
+Do not reuse an example merely because the input resembles it; compose the best sentence for the actual meaning.
+
+OUTPUT ONLY the finished archaic rendering. No explanation, quotation marks, labels, alternatives, or notes.`;
+
+return `
+import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1";
+let pipe=null,loadPromise=null,modelName=null;
+const SYSTEM=${JSON.stringify(SYSTEM)};
+
+async function ensure(){
+  if(pipe)return pipe;
+  if(loadPromise)return loadPromise;
+  loadPromise=(async()=>{
+    const useGPU=!!self.navigator?.gpu;
+    modelName=useGPU?"onnx-community/Qwen2.5-1.5B-Instruct":"onnx-community/Qwen2.5-0.5B-Instruct";
+    const device=useGPU?"webgpu":"wasm";
+    const dtype=useGPU?"q4f16":"q4";
+    self.postMessage({type:"status",stage:"loading",device,model:modelName});
+    pipe=await pipeline("text-generation",modelName,{
+      device,dtype,
+      progress_callback:p=>{
+        if(p&&typeof p.progress==="number")self.postMessage({type:"progress",value:Math.max(0,Math.min(100,p.progress))});
+      }
+    });
+    self.postMessage({type:"status",stage:"ready",device,model:modelName});
+    return pipe;
+  })();
+  return loadPromise;
+}
+
+self.onmessage=async e=>{
+  const {type,id,text,variant}=e.data||{};
+  if(type!=="translate")return;
+  try{
+    const g=await ensure();
+    const variation=variant>0
+      ? "\\nThis is regeneration "+variant+". Produce a meaning-equivalent but substantially different image, cadence, or construction from a likely first answer."
+      : "";
+    const user="Render this modern utterance into the target register:\\n\\n"+text+variation;
+    const out=await g([{role:"system",content:SYSTEM},{role:"user",content:user}],{
+      max_new_tokens:160,
+      do_sample:true,
+      temperature:variant>0?0.88:0.72,
+      top_p:0.92,
+      repetition_penalty:1.08
+    });
+    let result=out?.[0]?.generated_text;
+    if(Array.isArray(result))result=result.at(-1)?.content;
+    result=String(result||"").trim()
+      .replace(/^[\\"“]|[\\"”]$/g,"")
+      .replace(/^(translation|archaic|early modern english|rendering)\\s*:\\s*/i,"")
+      .trim();
+    if(!result)throw new Error("Empty translation");
+    self.postMessage({type:"result",id,result,model:modelName});
+  }catch(err){
+    self.postMessage({type:"error",id,message:String(err?.message||err)});
+  }
+};`
+}
+
+function ensureWorker(){
+  if(worker)return worker;
+  const blob=new Blob([sourceForWorker()],{type:"text/javascript"});
+  worker=new Worker(URL.createObjectURL(blob),{type:"module"});
+  worker.onmessage=e=>{
+    const d=e.data||{};
+    if(d.type==="progress"){
+      E.progressWrap.classList.add("show");E.progress.style.width=`${d.value}%`
+    }else if(d.type==="status"){
+      if(d.stage==="loading"){
+        setStatus("work",d.device==="webgpu"?"Loading stronger local AI…":"Loading compact local AI…");
+        E.progressWrap.classList.add("show")
+      }else{
+        modelReady=true;setStatus("good",d.device==="webgpu"?"Local AI ready · 1.5B":"Local AI ready · compact");
+        E.progress.style.width="100%";setTimeout(()=>E.progressWrap.classList.remove("show"),450)
+      }
+    }else if(d.type==="result"){
+      if(d.id!==currentRequest)return;
+      modelReady=true;show(clean(d.result),"semantic dramatic AI");setStatus("good","Local AI ready");busy(false);E.progressWrap.classList.remove("show")
+    }else if(d.type==="error"){
+      if(d.id!==currentRequest)return;
+      fallbackOnly=true;show(fallback(lastInput),"advanced fallback");setStatus("bad","AI unavailable · fallback active");busy(false);
+      E.progressWrap.classList.remove("show");toast("AI could not start; using the limited fallback.");console.error(d.message)
+    }
+  };
+  worker.onerror=err=>{
+    fallbackOnly=true;setStatus("bad","AI unavailable · fallback active");busy(false);console.error(err)
+  };
+  return worker
+}
+
+function clean(s){
+  let x=String(s||"").trim().replace(/^["“]|["”]$/g,"").trim();
+  x=x.replace(/^(translation|archaic|rendering)\s*:\s*/i,"").trim();
+  return x
+}
+
+function translate(regen=false){
+  const src=E.input.value.trim();if(!src){E.input.focus();return}
+  if(src!==lastInput)generation=0;else if(regen)generation++;
+  lastInput=src;currentRequest++;
+
+  const preview=fallback(src);
+  show(preview,modelReady?"semantic rewrite pending":"instant preview");
+
+  if(fallbackOnly){show(preview,"advanced fallback");return}
+  if(location.protocol==="file:"){
+    fallbackOnly=true;show(preview,"advanced fallback");setStatus("bad","Launch through localhost for AI");
+    toast("Use START_ARCHAIC.bat for the full translator.");return
+  }
+
+  busy(true);setStatus("work",modelReady?"Recomposing meaning…":"Preparing semantic engine…");
+  ensureWorker().postMessage({type:"translate",id:currentRequest,text:src,variant:generation})
+}
+
+E.input.addEventListener("input",()=>E.counter.textContent=`${E.input.value.length} / 500`);
+E.input.addEventListener("keydown",e=>{if((e.ctrlKey||e.metaKey)&&e.key==="Enter"){e.preventDefault();translate(false)}});
+E.translate.addEventListener("click",()=>translate(false));
+E.regenerate.addEventListener("click",()=>translate(true));
+E.clear.addEventListener("click",()=>{
+  E.input.value="";E.counter.textContent="0 / 500";lastInput="";lastOutput="";generation=0;
+  E.output.textContent="Thy translation shall appear here.";E.output.classList.add("placeholder");
+  E.copy.disabled=true;E.regenerate.disabled=true;
+  E.meta.innerHTML='<span class="pill">meaning first</span><span class="pill">period rhetoric</span><span class="pill">original wording</span>';
+  E.input.focus()
+});
+E.copy.addEventListener("click",async()=>{
+  if(!lastOutput)return;
+  try{await navigator.clipboard.writeText(lastOutput);toast("Copied.")}catch{toast("Clipboard access was blocked.")}
+});
+</script>
+</body>
+</html>
