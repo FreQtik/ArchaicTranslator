@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#f3f4f6">
 <meta name="description" content="A local-first semantic translator from casual modern English into dramatic literary Early Modern English.">
-<title>Archaic — Translator</title>
+<title>Archaic — Translator v3.1</title>
 <style>
 :root{
   color-scheme:light;
@@ -254,7 +254,7 @@ Internally perform four steps:
 4. Check pronoun and verb agreement before answering.
 
 TARGET STYLE:
-- Shakespearean in rhetorical energy, but NEVER quote Shakespeare or imitate a specific copyrighted modern adaptation.
+- Shakespearean in rhetorical energy, but NEVER quote Shakespeare or any source text.
 - Original wording only.
 - Noticeably more colourful than the modern sentence.
 - Usually one or two strong sentences.
@@ -262,7 +262,7 @@ TARGET STYLE:
 - Surprise should become exclamation or rhetorical question where natural.
 - Annoyance should carry bite.
 - Affection should become warm, elevated language.
-- Plain informational statements should remain understandable and need not become absurdly poetic.
+- Plain informational statements should remain understandable.
 - Do not add facts the speaker did not imply.
 
 GRAMMAR:
@@ -270,88 +270,187 @@ GRAMMAR:
 - singular familiar object: thee
 - possessive adjective: thy; thine before a vowel sound and as standalone possessive
 - art, wast/wert, hast, dost, didst, wilt, shalt, canst, mayst, wouldst, shouldst
-- correct -st/-est agreement with thou when appropriate
+- correct -st/-est agreement with thou where appropriate
 - imperative uses the base verb: "Go forth and create", NOT "createth"
 - third-person -th/-eth may appear where idiomatic
 - wherefore = why; whither = to where; whence = from where
-- contractions and modern filler words should normally be recomposed, not copied
+- modern filler words and slang should normally be recomposed, not copied
 
 QUALITY TEST:
-If the result could be produced by simply replacing "your" with "thy", it is probably too literal. Rewrite the underlying thought instead.
+If the result could be produced by simply replacing "your" with "thy", it is too literal. Rewrite the underlying thought.
 
-Examples of the desired transformation principle:
-Modern: "Your jacket looks like garbage."
-Desired kind of result: "That coat upon thy back is fit more for the midden than for decent company."
-
-Modern: "What the heck did you think you were doing?"
-Desired kind of result: "What madness possessed thee? What didst thou imagine thyself about?"
-
-Modern: "What's this, man? Come on."
-Desired kind of result: "What folly is this, good fellow? Come, have done."
-
-Modern: "Are you kidding me?"
-Desired kind of result: "Dost thou make sport of me?"
-
-Do not reuse an example merely because the input resembles it; compose the best sentence for the actual meaning.
-
-OUTPUT ONLY the finished archaic rendering. No explanation, quotation marks, labels, alternatives, or notes.`;
+OUTPUT ONLY the finished archaic rendering. No explanation, labels, alternatives, or notes.`;
 
 return `
 import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1";
-let pipe=null,loadPromise=null,modelName=null;
-const SYSTEM=${JSON.stringify(SYSTEM)};
 
-async function ensure(){
-  if(pipe)return pipe;
-  if(loadPromise)return loadPromise;
-  loadPromise=(async()=>{
-    const useGPU=!!self.navigator?.gpu;
-    modelName=useGPU?"onnx-community/Qwen2.5-1.5B-Instruct":"onnx-community/Qwen2.5-0.5B-Instruct";
-    const device=useGPU?"webgpu":"wasm";
-    const dtype=useGPU?"q4f16":"q4";
-    self.postMessage({type:"status",stage:"loading",device,model:modelName});
-    pipe=await pipeline("text-generation",modelName,{
-      device,dtype,
-      progress_callback:p=>{
-        if(p&&typeof p.progress==="number")self.postMessage({type:"progress",value:Math.max(0,Math.min(100,p.progress))});
-      }
+const SYSTEM=${JSON.stringify(SYSTEM)};
+let pipe=null;
+let activePlan=null;
+let plans=null;
+
+async function buildPlans(){
+  if(plans)return plans;
+  const out=[];
+  let adapter=null;
+  let hasF16=false;
+
+  if(self.navigator?.gpu){
+    try{
+      adapter=await self.navigator.gpu.requestAdapter({powerPreference:"high-performance"});
+      hasF16=!!adapter?.features?.has?.("shader-f16");
+    }catch(_){}
+  }
+
+  // Only attempt q4f16 when the actual adapter exposes shader-f16.
+  // This avoids the common "downloads completely, then fails on first inference" path.
+  if(adapter && hasF16){
+    out.push({
+      label:"1.5B WebGPU",
+      model:"onnx-community/Qwen2.5-1.5B-Instruct",
+      device:"webgpu",
+      dtype:"q4f16"
     });
-    self.postMessage({type:"status",stage:"ready",device,model:modelName});
-    return pipe;
-  })();
-  return loadPromise;
+    out.push({
+      label:"0.5B WebGPU",
+      model:"onnx-community/Qwen2.5-0.5B-Instruct",
+      device:"webgpu",
+      dtype:"q4f16"
+    });
+  }
+
+  // Compatible WebGPU path for adapters without shader-f16, and also a rescue path
+  // when the stronger q4f16 model fails for memory/driver reasons.
+  if(adapter){
+    out.push({
+      label:"0.5B WebGPU compatibility",
+      model:"onnx-community/Qwen2.5-0.5B-Instruct",
+      device:"webgpu",
+      dtype:"q4"
+    });
+  }
+
+  // Last actual-AI fallback before the handcrafted rules.
+  out.push({
+    label:"0.5B CPU compatibility",
+    model:"onnx-community/Qwen2.5-0.5B-Instruct",
+    device:"wasm",
+    dtype:"q8"
+  });
+
+  plans=out;
+  self.postMessage({type:"capabilities",webgpu:!!adapter,shaderF16:hasF16,plans:out.map(x=>x.label)});
+  return plans;
+}
+
+async function disposePipe(){
+  if(pipe){
+    try{
+      if(typeof pipe.dispose==="function") await pipe.dispose();
+    }catch(_){}
+  }
+  pipe=null;
+  activePlan=null;
+}
+
+async function loadPlan(plan,index,total){
+  await disposePipe();
+  self.postMessage({
+    type:"status",stage:"loading",device:plan.device,model:plan.model,
+    label:plan.label,attempt:index+1,total
+  });
+
+  pipe=await pipeline("text-generation",plan.model,{
+    device:plan.device,
+    dtype:plan.dtype,
+    progress_callback:p=>{
+      if(p&&typeof p.progress==="number"){
+        self.postMessage({
+          type:"progress",
+          value:Math.max(0,Math.min(100,p.progress)),
+          label:plan.label
+        });
+      }
+    }
+  });
+
+  activePlan=plan;
+  self.postMessage({
+    type:"status",stage:"ready",device:plan.device,model:plan.model,
+    label:plan.label,attempt:index+1,total
+  });
+  return pipe;
+}
+
+function makeMessages(text,variant){
+  const variation=variant>0
+    ? "\\nThis is regeneration "+variant+". Produce a meaning-equivalent but substantially different image, cadence, or construction."
+    : "";
+  return [
+    {role:"system",content:SYSTEM},
+    {role:"user",content:"Render this modern utterance into the target register:\\n\\n"+text+variation}
+  ];
+}
+
+async function generateWithCurrent(text,variant){
+  if(!pipe)throw new Error("No model loaded");
+  const out=await pipe(makeMessages(text,variant),{
+    max_new_tokens:160,
+    do_sample:true,
+    temperature:variant>0?0.88:0.72,
+    top_p:0.92,
+    repetition_penalty:1.08
+  });
+
+  let result=out?.[0]?.generated_text;
+  if(Array.isArray(result))result=result.at(-1)?.content;
+  result=String(result||"").trim()
+    .replace(/^[\\"“]|[\\"”]$/g,"")
+    .replace(/^(translation|archaic|early modern english|rendering)\\s*:\\s*/i,"")
+    .trim();
+
+  if(!result)throw new Error("Empty translation");
+  return result;
 }
 
 self.onmessage=async e=>{
   const {type,id,text,variant}=e.data||{};
   if(type!=="translate")return;
-  try{
-    const g=await ensure();
-    const variation=variant>0
-      ? "\\nThis is regeneration "+variant+". Produce a meaning-equivalent but substantially different image, cadence, or construction from a likely first answer."
-      : "";
-    const user="Render this modern utterance into the target register:\\n\\n"+text+variation;
-    const out=await g([{role:"system",content:SYSTEM},{role:"user",content:user}],{
-      max_new_tokens:160,
-      do_sample:true,
-      temperature:variant>0?0.88:0.72,
-      top_p:0.92,
-      repetition_penalty:1.08
-    });
-    let result=out?.[0]?.generated_text;
-    if(Array.isArray(result))result=result.at(-1)?.content;
-    result=String(result||"").trim()
-      .replace(/^[\\"“]|[\\"”]$/g,"")
-      .replace(/^(translation|archaic|early modern english|rendering)\\s*:\\s*/i,"")
-      .trim();
-    if(!result)throw new Error("Empty translation");
-    self.postMessage({type:"result",id,result,model:modelName});
-  }catch(err){
-    self.postMessage({type:"error",id,message:String(err?.message||err)});
+
+  const available=await buildPlans();
+  const errors=[];
+
+  // If a configuration already worked, always try it first.
+  if(pipe && activePlan){
+    try{
+      const result=await generateWithCurrent(text,variant);
+      self.postMessage({type:"result",id,result,label:activePlan.label,model:activePlan.model});
+      return;
+    }catch(err){
+      errors.push(activePlan.label+": "+String(err?.message||err));
+      self.postMessage({type:"retry",label:activePlan.label,reason:String(err?.message||err)});
+      await disposePipe();
+    }
   }
+
+  // Try every real AI configuration before ever dropping to rules.
+  for(let i=0;i<available.length;i++){
+    const plan=available[i];
+    try{
+      await loadPlan(plan,i,available.length);
+      const result=await generateWithCurrent(text,variant);
+      self.postMessage({type:"result",id,result,label:plan.label,model:plan.model});
+      return;
+    }catch(err){
+      errors.push(plan.label+": "+String(err?.message||err));
+      self.postMessage({type:"retry",label:plan.label,reason:String(err?.message||err),attempt:i+1,total:available.length});
+      await disposePipe();
+    }
+  }
+
+  self.postMessage({type:"error",id,message:errors.join("\\n")||"No compatible local AI backend could start."});
 };`
 }
-
 function ensureWorker(){
   if(worker)return worker;
   const blob=new Blob([sourceForWorker()],{type:"text/javascript"});
@@ -362,19 +461,25 @@ function ensureWorker(){
       E.progressWrap.classList.add("show");E.progress.style.width=`${d.value}%`
     }else if(d.type==="status"){
       if(d.stage==="loading"){
-        setStatus("work",d.device==="webgpu"?"Loading stronger local AI…":"Loading compact local AI…");
+        setStatus("work","Loading "+(d.label||"local AI")+"…");
         E.progressWrap.classList.add("show")
       }else{
-        modelReady=true;setStatus("good",d.device==="webgpu"?"Local AI ready · 1.5B":"Local AI ready · compact");
+        modelReady=true;setStatus("good",(d.label||"Local AI")+" ready");
         E.progress.style.width="100%";setTimeout(()=>E.progressWrap.classList.remove("show"),450)
       }
+    }else if(d.type==="retry"){
+      setStatus("work","Compatibility retry…");
+      E.progress.style.width="0%";
+      console.warn("Archaic AI retry:",d.label,d.reason)
+    }else if(d.type==="capabilities"){
+      console.info("Archaic AI capabilities:",d)
     }else if(d.type==="result"){
       if(d.id!==currentRequest)return;
-      modelReady=true;show(clean(d.result),"semantic dramatic AI");setStatus("good","Local AI ready");busy(false);E.progressWrap.classList.remove("show")
+      modelReady=true;show(clean(d.result),d.label||"semantic dramatic AI");setStatus("good",(d.label||"Local AI")+" ready");busy(false);E.progressWrap.classList.remove("show")
     }else if(d.type==="error"){
       if(d.id!==currentRequest)return;
       fallbackOnly=true;show(fallback(lastInput),"advanced fallback");setStatus("bad","AI unavailable · fallback active");busy(false);
-      E.progressWrap.classList.remove("show");toast("AI could not start; using the limited fallback.");console.error(d.message)
+      E.progressWrap.classList.remove("show");toast("All local AI compatibility modes failed; using the limited fallback.");console.error(d.message)
     }
   };
   worker.onerror=err=>{
