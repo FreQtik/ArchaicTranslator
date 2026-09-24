@@ -69,7 +69,7 @@ textarea::placeholder{color:#b6bac0}
   <header>
     <div>
       <h1>Archaic</h1>
-      <div class="sub">Casual English → authentic dramatic Early Modern English</div>
+      <div class="sub">Casual English → vivid literary Early Modern English</div>
     </div>
     <div class="status"><span id="statusDot" class="dot"></span><span id="statusText">Ready</span></div>
   </header>
@@ -248,135 +248,210 @@ function fallback(src){
 }
 
 function sourceForWorker(){
-const SYSTEM=`You are a specialist translator and literary rewriter for natural, dramatic Early Modern English.
+const SYSTEM=`Rewrite casual modern English as vivid, natural literary Early Modern English.
 
-The user gives you casual contemporary English. Preserve the MEANING, SOCIAL INTENT, ATTITUDE, and EMOTIONAL FORCE, but do not preserve modern wording unnecessarily.
+Preserve the speaker's MEANING, TONE, humour, annoyance, affection, insult, or disbelief — but do NOT preserve modern wording when an older expression is better.
 
-Internally:
-1. Infer slang, sarcasm, insults, disbelief, humour, frustration, and implied context.
-2. Discard modern idiom where a period-style expression is more natural.
-3. Recompose using plausible Early Modern grammar, vocabulary, cadence, rhetorical parallelism, metaphor, hyperbole, inversion, exclamation, or imagery where appropriate.
-4. Check pronoun and verb agreement.
+Use correct forms such as thou/thee/thy/thine, art, hast, dost, didst, wilt, shalt, canst, wast/wert, and -st/-est where natural. Imperatives use the base verb. Wherefore means why; whither means to where; whence means from where.
 
-Style:
-- Shakespearean in rhetorical energy, but quote no source text.
-- Original wording only.
-- Usually one or two strong sentences.
-- Casual insults become inventive period-style contempt rather than literal substitutions.
-- Surprise may become exclamation or rhetorical question.
-- Annoyance carries bite.
-- Affection becomes warm and elevated.
-- Do not add facts not implied by the input.
+Be colourful and rhetorically alive, but understandable. Use an original period-style metaphor, inversion, exclamation, or rhetorical question when it fits. Never quote Shakespeare or another source.
 
-Grammar:
-- thou = singular familiar subject; thee = object
-- thy = possessive adjective; thine before a vowel sound and standalone
-- art, wast/wert, hast, dost, didst, wilt, shalt, canst, mayst, wouldst, shouldst
-- use -st/-est with thou where natural
-- imperatives use the base verb: "Go forth and create", never "createth"
-- wherefore = why; whither = to where; whence = from where
+Examples:
+"Your jacket looks like garbage." -> "That coat upon thy back is fit more for the midden than for decent company."
+"What the heck did you think you were doing?" -> "What madness possessed thee? What didst thou imagine thyself about?"
+"Are you kidding me?" -> "Dost thou make sport of me?"
 
-Quality test:
-If the result could have been made merely by replacing "your" with "thy", rewrite the underlying thought.
-
-Output ONLY the finished archaic rendering.`;
+Output ONLY the rewritten sentence or sentences.`;
 
 return `
 import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.8.1";
 
-// GitHub Pages does not send COOP/COEP cross-origin-isolation headers.
-// Force ONNX Runtime to remain single-threaded so it does not depend on
-// SharedArrayBuffer / threaded WASM workers.
 env.backends.onnx.wasm.numThreads = 1;
 env.backends.onnx.wasm.proxy = false;
 
+const MODEL="onnx-community/Qwen2.5-0.5B-Instruct";
 const SYSTEM=${JSON.stringify(SYSTEM)};
-let pipe=null;
-let plan=null;
 
-async function capabilities(){
-  let adapter=null;
-  let shaderF16=false;
+let pipe=null;
+let activeDevice=null;
+let activeLabel=null;
+
+async function hasWebGPU(){
   try{
-    adapter=await self.navigator?.gpu?.requestAdapter({powerPreference:"high-performance"});
-    shaderF16=!!adapter?.features?.has?.("shader-f16");
-  }catch(_){}
-  return {webgpu:!!adapter,shaderF16};
+    if(!self.navigator?.gpu)return false;
+    const adapter=await self.navigator.gpu.requestAdapter({powerPreference:"high-performance"});
+    return !!adapter;
+  }catch(_){
+    return false;
+  }
 }
 
-async function load(){
-  if(pipe)return pipe;
-
-  const caps=await capabilities();
-  self.postMessage({type:"capabilities",...caps,crossOriginIsolated:self.crossOriginIsolated===true});
-
-  if(caps.webgpu){
-    // q4f16 is much smaller and is used only when the GPU explicitly exposes shader-f16.
-    // Otherwise use the q4 configuration documented by Transformers.js for this model.
-    plan = caps.shaderF16
-      ? {device:"webgpu",dtype:"q4f16",label:"Qwen 0.5B · WebGPU q4f16"}
-      : {device:"webgpu",dtype:"q4",label:"Qwen 0.5B · WebGPU q4"};
-  }else{
-    // CPU route. q4 keeps us on one model family and avoids a second huge 8-bit download.
-    plan={device:"wasm",dtype:"q4",label:"Qwen 0.5B · CPU q4"};
+async function dispose(){
+  if(pipe){
+    try{
+      if(typeof pipe.dispose==="function")await pipe.dispose();
+    }catch(_){}
   }
+  pipe=null;
+  activeDevice=null;
+  activeLabel=null;
+}
 
-  self.postMessage({type:"status",stage:"loading",label:plan.label,device:plan.device,dtype:plan.dtype});
-  pipe=await pipeline(
-    "text-generation",
-    "onnx-community/Qwen2.5-0.5B-Instruct",
-    {
-      device:plan.device,
-      dtype:plan.dtype,
-      progress_callback:p=>{
-        if(p&&typeof p.progress==="number"){
-          self.postMessage({type:"progress",value:Math.max(0,Math.min(100,p.progress)),label:plan.label});
-        }
+async function load(device){
+  if(pipe && activeDevice===device)return pipe;
+  await dispose();
+
+  activeDevice=device;
+  activeLabel=device==="webgpu" ? "Qwen 0.5B · WebGPU q4" : "Qwen 0.5B · CPU q4";
+
+  self.postMessage({type:"status",stage:"loading",label:activeLabel});
+
+  // Use the exact q4 configuration recommended in the Transformers.js
+  // documentation for Qwen2.5-0.5B-Instruct.
+  pipe=await pipeline("text-generation",MODEL,{
+    device,
+    dtype:"q4",
+    progress_callback:p=>{
+      if(p&&typeof p.progress==="number"){
+        self.postMessage({
+          type:"progress",
+          value:Math.max(0,Math.min(100,p.progress)),
+          label:activeLabel
+        });
       }
     }
-  );
-  self.postMessage({type:"status",stage:"ready",label:plan.label,device:plan.device,dtype:plan.dtype});
+  });
+
+  self.postMessage({type:"status",stage:"ready",label:activeLabel});
   return pipe;
+}
+
+function badGeneration(text){
+  const s=String(text||"").trim();
+  const low=s.toLowerCase();
+
+  if(!s || s.length<2 || s.length>650)return true;
+  if(/[0-9]{14,}/.test(s))return true;
+
+  // Leaking/looping the internal prompt is never valid user output.
+  if(
+    low.includes("render this modern") ||
+    low.includes("target register") ||
+    low.includes("modern utterance") ||
+    low.includes("output only the") ||
+    low.includes("rewrite casual modern english")
+  )return true;
+
+  const words=(low.match(/[a-z']+/g)||[]);
+  if(words.length>=12){
+    const unique=new Set(words);
+    if(unique.size/words.length<0.42)return true;
+
+    // Repeated trigram detector.
+    const grams=new Map();
+    for(let i=0;i<=words.length-3;i++){
+      const g=words.slice(i,i+3).join(" ");
+      grams.set(g,(grams.get(g)||0)+1);
+      if(grams.get(g)>=3)return true;
+    }
+  }
+
+  return false;
+}
+
+function cleanResult(out){
+  let result=out?.[0]?.generated_text;
+  if(Array.isArray(result))result=result.at(-1)?.content;
+
+  result=String(result||"").trim()
+    .replace(/^[\\"“]|[\\"”]$/g,"")
+    .replace(/^(translation|archaic|early modern english|rendering)\\s*:\\s*/i,"")
+    .trim();
+
+  return result;
+}
+
+async function generate(text,variant,device){
+  const g=await load(device);
+
+  const variantInstruction=variant>0
+    ? "\\nUse a different image and sentence construction from the previous rendering."
+    : "";
+
+  const messages=[
+    {role:"system",content:SYSTEM},
+    {
+      role:"user",
+      content:"Rewrite this:\\n"+text+variantInstruction
+    }
+  ];
+
+  // Greedy decoding is deliberate. With this tiny quantized model,
+  // sampling can amplify unstable token loops.
+  const out=await g(messages,{
+    max_new_tokens:96,
+    do_sample:false,
+    repetition_penalty:1.15
+  });
+
+  return cleanResult(out);
 }
 
 self.onmessage=async e=>{
   const {type,id,text,variant}=e.data||{};
   if(type!=="translate")return;
-  try{
-    const g=await load();
-    const variation=variant>0
-      ? "\\nThis is regeneration "+variant+". Give a substantially different but meaning-equivalent image, cadence, or construction."
-      : "";
-    const user="Render this modern utterance into the target register:\\n\\n"+text+variation;
 
-    const out=await g(
-      [{role:"system",content:SYSTEM},{role:"user",content:user}],
-      {
-        max_new_tokens:144,
-        do_sample:true,
-        temperature:variant>0?0.86:0.70,
-        top_p:0.90,
-        repetition_penalty:1.08
+  const errors=[];
+  const gpu=await hasWebGPU();
+  self.postMessage({
+    type:"capabilities",
+    webgpu:gpu,
+    crossOriginIsolated:self.crossOriginIsolated===true
+  });
+
+  // Preferred path: official WebGPU q4 recipe.
+  if(gpu){
+    try{
+      const result=await generate(text,variant,"webgpu");
+      if(!badGeneration(result)){
+        self.postMessage({
+          type:"result",id,result,label:"Qwen 0.5B · WebGPU q4"
+        });
+        return;
       }
-    );
-
-    let result=out?.[0]?.generated_text;
-    if(Array.isArray(result))result=result.at(-1)?.content;
-    result=String(result||"").trim()
-      .replace(/^[\\"“]|[\\"”]$/g,"")
-      .replace(/^(translation|archaic|early modern english|rendering)\\s*:\\s*/i,"")
-      .trim();
-
-    if(!result)throw new Error("The model returned an empty translation.");
-    self.postMessage({type:"result",id,result,label:plan?.label||"local semantic AI"});
-  }catch(err){
-    const detail = [
-      "Message: "+String(err?.message||err),
-      "Name: "+String(err?.name||"Error"),
-      "Stack: "+String(err?.stack||"(no stack available)")
-    ].join("\\n");
-    self.postMessage({type:"error",id,message:detail});
+      errors.push("WebGPU produced degenerate/repetitive text.");
+      self.postMessage({
+        type:"retry",
+        reason:"WebGPU output failed the quality check; retrying on CPU."
+      });
+    }catch(err){
+      errors.push("WebGPU: "+String(err?.message||err));
+      self.postMessage({
+        type:"retry",
+        reason:"WebGPU inference failed; retrying on CPU."
+      });
+    }
   }
+
+  // Stability rescue. It reuses the already cached q4 model assets.
+  try{
+    const result=await generate(text,variant,"wasm");
+    if(!badGeneration(result)){
+      self.postMessage({
+        type:"result",id,result,label:"Qwen 0.5B · CPU q4"
+      });
+      return;
+    }
+    errors.push("CPU q4 also produced degenerate/repetitive text.");
+  }catch(err){
+    errors.push("CPU: "+String(err?.message||err));
+  }
+
+  self.postMessage({
+    type:"error",
+    id,
+    message:errors.join("\\n") || "The local model could not produce a stable translation."
+  });
 };`
 }
 function ensureWorker(){
@@ -392,6 +467,10 @@ function ensureWorker(){
       E.progress.style.width=`${d.value}%`;
     }else if(d.type==="capabilities"){
       console.info("Archaic AI capabilities:",d);
+    }else if(d.type==="retry"){
+      setStatus("work","Output unstable · retrying safely…");
+      E.progress.style.width="0%";
+      console.warn("Archaic AI retry:",d.reason);
     }else if(d.type==="status"){
       if(d.stage==="loading"){
         setStatus("work","Loading "+(d.label||"local AI")+"…");
@@ -418,11 +497,11 @@ function ensureWorker(){
       E.diagnosticText.textContent=detail;
       E.diagnostics.classList.add("show");
       show(fallback(lastInput),"advanced fallback");
-      setStatus("bad","AI unavailable · error shown below");
+      setStatus("bad","AI unstable · details shown below");
       busy(false);
       E.progressWrap.classList.remove("show");
       console.error("Archaic local AI failure:\\n"+detail);
-      toast("Local AI failed; the exact error is now shown on the page.");
+      toast("The model could not produce stable text; details are shown below.");
     }
   };
 
@@ -431,7 +510,7 @@ function ensureWorker(){
     const detail="Worker error: "+String(err?.message||err);
     E.diagnosticText.textContent=detail;
     E.diagnostics.classList.add("show");
-    setStatus("bad","AI unavailable · error shown below");
+    setStatus("bad","AI unstable · details shown below");
     busy(false);
     console.error(err);
   };
